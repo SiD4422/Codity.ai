@@ -175,8 +175,8 @@ class Worker {
 // Boot: PROJECT_ID env var picks which project's queues this worker serves.
 const projectId = process.env.PROJECT_ID;
 if (!projectId) {
-  console.error('PROJECT_ID env var required to start a worker');
-  process.exit(1);
+  console.warn('PROJECT_ID env var is missing. Worker will not start. Set this in your environment to enable the worker.');
+  process.exit(0);
 }
 
 const worker = new Worker({ projectId, maxConcurrency: Number(process.env.MAX_CONCURRENCY) || 5 });
