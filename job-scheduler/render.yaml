@@ -3,7 +3,7 @@ services:
     name: job-scheduler-api
     runtime: node
     plan: free
-    rootDir: backend
+    rootDir: job-scheduler/backend
     buildCommand: npm install
     startCommand: npm run migrate && node src/start-all.js
     envVars:
