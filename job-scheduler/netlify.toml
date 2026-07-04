@@ -1,7 +1,7 @@
 [build]
-  base = "frontend"
+  base = "job-scheduler/frontend"
   command = "npm run build"
-  publish = "frontend/dist"
+  publish = "dist"
 
 [build.environment]
   NODE_VERSION = "20"
