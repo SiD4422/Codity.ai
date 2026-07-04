@@ -3,26 +3,36 @@ import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { useProject } from '../api/ProjectContext';
 import { useLiveStatus } from '../api/useLiveStatus';
+import { useToast } from '../components/Toast';
 import StatusBadge from '../components/StatusBadge';
 
 export default function QueuesPage() {
   const { projects, selected, selectedId, select, refresh } = useProject();
   const [queues, setQueues] = useState([]);
   const [stats, setStats] = useState({});
+  const [loading, setLoading] = useState(true);
   const [showNewProject, setShowNewProject] = useState(false);
   const [showNewQueue, setShowNewQueue] = useState(false);
   const live = useLiveStatus();
+  const toast = useToast();
 
   async function loadQueues() {
     if (!selectedId) return;
-    const { data } = await api.listQueues(selectedId);
-    setQueues(data);
-    const statMap = {};
-    await Promise.all(data.map(async (q) => {
-      const s = await api.queueStats(q.id);
-      statMap[q.id] = s.data;
-    }));
-    setStats(statMap);
+    setLoading(true);
+    try {
+      const { data } = await api.listQueues(selectedId);
+      setQueues(data);
+      const statMap = {};
+      await Promise.all(data.map(async (q) => {
+        const s = await api.queueStats(q.id);
+        statMap[q.id] = s.data;
+      }));
+      setStats(statMap);
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => { loadQueues(); }, [selectedId]);
@@ -62,8 +72,10 @@ export default function QueuesPage() {
         <NewQueueForm projectId={selectedId} onCreated={() => { setShowNewQueue(false); loadQueues(); }} onCancel={() => setShowNewQueue(false)} />
       )}
 
-      {queues.length === 0 ? (
+      {queues.length === 0 && !loading ? (
         <EmptyState title="No queues" body="Create a queue to start scheduling jobs against this project." />
+      ) : loading && queues.length === 0 ? (
+        <div style={{ color: 'var(--text-dim)', fontSize: 13 }}>Loading queues…</div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
           {queues.map(q => <QueueCard key={q.id} queue={q} stats={stats[q.id]} onChange={loadQueues} />)}
@@ -76,11 +88,18 @@ export default function QueuesPage() {
 function QueueCard({ queue, stats, onChange }) {
   const counts = stats?.statusCounts || {};
   const dlqCount = counts.dead_letter || 0;
+  const toast = useToast();
 
   async function toggle() {
-    if (queue.state === 'active') await api.pauseQueue(queue.id);
-    else await api.resumeQueue(queue.id);
-    onChange();
+    const pausing = queue.state === 'active';
+    if (pausing && !window.confirm(`Pause "${queue.name}"? Workers will stop claiming new jobs from it until resumed.`)) return;
+    try {
+      if (pausing) await api.pauseQueue(queue.id);
+      else await api.resumeQueue(queue.id);
+      onChange();
+    } catch (err) {
+      toast(err.message);
+    }
   }
 
   return (
@@ -126,12 +145,18 @@ function Stat({ label, value, color }) {
 function NewProjectForm({ onCreated, onCancel }) {
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
+  const toast = useToast();
   async function submit(e) {
     e.preventDefault();
     setBusy(true);
-    await api.createProject({ name });
-    setBusy(false);
-    onCreated();
+    try {
+      await api.createProject({ name });
+      onCreated();
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      setBusy(false);
+    }
   }
   return (
     <PanelForm onSubmit={submit} onCancel={onCancel} busy={busy} submitLabel="Create project">
@@ -141,20 +166,34 @@ function NewProjectForm({ onCreated, onCancel }) {
 }
 
 function NewQueueForm({ projectId, onCreated, onCancel }) {
-  const [form, setForm] = useState({ name: '', priority: 0, concurrencyLimit: 5 });
+  const [form, setForm] = useState({ name: '', priority: 0, concurrencyLimit: 5, retryPolicyId: '' });
+  const [policies, setPolicies] = useState([]);
   const [busy, setBusy] = useState(false);
+  const toast = useToast();
+
+  useEffect(() => { api.listRetryPolicies().then(r => setPolicies(r.data)).catch(() => {}); }, []);
+
   async function submit(e) {
     e.preventDefault();
     setBusy(true);
-    await api.createQueue({ projectId, ...form });
-    setBusy(false);
-    onCreated();
+    try {
+      await api.createQueue({ ...form, projectId, retryPolicyId: form.retryPolicyId || undefined });
+      onCreated();
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      setBusy(false);
+    }
   }
   return (
     <PanelForm onSubmit={submit} onCancel={onCancel} busy={busy} submitLabel="Create queue">
       <input autoFocus required placeholder="Queue name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
       <input type="number" placeholder="Priority" value={form.priority} onChange={e => setForm({ ...form, priority: Number(e.target.value) })} />
       <input type="number" placeholder="Concurrency limit" value={form.concurrencyLimit} onChange={e => setForm({ ...form, concurrencyLimit: Number(e.target.value) })} />
+      <select value={form.retryPolicyId} onChange={e => setForm({ ...form, retryPolicyId: e.target.value })}>
+        <option value="">Default retry (5x, exponential)</option>
+        {policies.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
     </PanelForm>
   );
 }

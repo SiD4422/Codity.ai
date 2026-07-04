@@ -5,7 +5,7 @@ export function useLiveStatus() {
   const wsRef = useRef(null);
 
   useEffect(() => {
-    const url = (import.meta.env.VITE_API_URL || 'http://localhost:4000/api').replace('/api', '').replace('http', 'ws') + '/ws';
+    const url = (import.meta.env.VITE_API_URL || 'http://localhost:4000/api/v1').replace(/\/api(\/v\d+)?$/, '').replace('http', 'ws') + '/ws';
     let ws;
     let retryTimer;
 

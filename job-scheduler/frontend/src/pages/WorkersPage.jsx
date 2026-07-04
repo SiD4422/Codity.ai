@@ -1,17 +1,26 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { useProject } from '../api/ProjectContext';
+import { useToast } from '../components/Toast';
 import StatusBadge from '../components/StatusBadge';
 import { EmptyState } from './QueuesPage';
 
 export default function WorkersPage() {
   const { selectedId } = useProject();
   const [workers, setWorkers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const toast = useToast();
 
   async function load() {
     if (!selectedId) return;
-    const { data } = await api.listWorkers(selectedId);
-    setWorkers(data);
+    try {
+      const { data } = await api.listWorkers(selectedId);
+      setWorkers(data);
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      setLoading(false);
+    }
   }
   useEffect(() => { load(); }, [selectedId]);
   useEffect(() => { const t = setInterval(load, 3000); return () => clearInterval(t); }, [selectedId]);
@@ -19,7 +28,9 @@ export default function WorkersPage() {
   return (
     <div>
       <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 400, fontSize: 26, marginBottom: 20 }}>Workers</h1>
-      {workers.length === 0 ? (
+      {loading && workers.length === 0 ? (
+        <div style={{ color: 'var(--text-dim)', fontSize: 13 }}>Loading workers…</div>
+      ) : workers.length === 0 ? (
         <EmptyState title="No workers registered"
           body={<>Start one with: <code style={{ display: 'block', marginTop: 6 }}>PROJECT_ID=&lt;id&gt; npm run worker</code></>} />
       ) : (

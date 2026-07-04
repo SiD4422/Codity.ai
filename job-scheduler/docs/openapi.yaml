@@ -1,0 +1,255 @@
+openapi: 3.0.3
+info:
+  title: Distributed Job Scheduler API
+  version: "1.0"
+  description: >
+    REST API for managing projects, queues, jobs, workers, retry policies,
+    and the dead letter queue. Full narrative docs in docs/api.md.
+servers:
+  - url: http://localhost:4000/api/v1
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+    Job:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        queue_id: { type: string, format: uuid }
+        type: { type: string, enum: [immediate, delayed, scheduled, recurring, batch] }
+        status: { type: string, enum: [queued, scheduled, claimed, running, completed, failed, dead_letter, cancelled] }
+        payload: { type: object }
+        priority: { type: integer }
+        attempt_count: { type: integer }
+        max_attempts: { type: integer }
+        run_at: { type: string, format: date-time }
+        last_error: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+    Queue:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        project_id: { type: string, format: uuid }
+        name: { type: string }
+        priority: { type: integer }
+        concurrency_limit: { type: integer }
+        state: { type: string, enum: [active, paused] }
+paths:
+  /auth/register:
+    post:
+      summary: Create an organization + admin user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, name, organizationName]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+                name: { type: string }
+                organizationName: { type: string }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { type: object, properties: { user: { type: object }, token: { type: string } } } } } }
+        '409': { description: Email already registered, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /auth/login:
+    post:
+      summary: Sign in
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string }
+                password: { type: string }
+      responses:
+        '200': { description: OK }
+        '401': { description: Invalid credentials, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /projects:
+    get:
+      summary: List projects in caller's organization
+      responses:
+        '200': { description: OK }
+    post:
+      summary: Create a project (generates a worker API key)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [name], properties: { name: { type: string } } }
+      responses:
+        '201': { description: Created }
+
+  /queues:
+    get:
+      summary: List queues for a project
+      parameters:
+        - { name: projectId, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: OK }
+    post:
+      summary: Create a queue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [projectId, name]
+              properties:
+                projectId: { type: string, format: uuid }
+                name: { type: string }
+                priority: { type: integer }
+                concurrencyLimit: { type: integer }
+                retryPolicyId: { type: string, format: uuid }
+      responses:
+        '201': { description: Created }
+
+  /queues/{id}/pause:
+    post:
+      summary: Pause a queue (workers stop claiming from it)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: OK } }
+
+  /queues/{id}/resume:
+    post:
+      summary: Resume a paused queue
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: OK } }
+
+  /queues/{id}/stats:
+    get:
+      summary: Status counts, throughput, avg duration for a queue
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: OK } }
+
+  /jobs:
+    get:
+      summary: Paginated, filterable job listing
+      parameters:
+        - { name: queueId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string } }
+        - { name: type, in: query, schema: { type: string } }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, default: 25, maximum: 100 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Job' } }
+                  pagination: { type: object }
+    post:
+      summary: Create a job (immediate, delayed, scheduled, recurring, or batch)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [queueId]
+              properties:
+                queueId: { type: string, format: uuid }
+                type: { type: string, enum: [immediate, delayed, scheduled, recurring, batch], default: immediate }
+                payload: { type: object }
+                priority: { type: integer }
+                delaySeconds: { type: integer, description: "required when type=delayed" }
+                runAt: { type: string, format: date-time, description: "required when type=scheduled" }
+                cronExpression: { type: string, description: "required when type=recurring" }
+                jobs: { type: array, items: { type: object }, description: "required when type=batch" }
+                retryPolicyId: { type: string, format: uuid }
+                idempotencyKey: { type: string }
+      responses:
+        '201': { description: Created }
+        '409': { description: Duplicate idempotency key, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /jobs/{id}:
+    get:
+      summary: Job detail including execution history
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: OK } }
+
+  /jobs/{id}/logs:
+    get:
+      summary: Structured logs across all attempts of a job
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: OK } }
+
+  /jobs/{id}/cancel:
+    post:
+      summary: Cancel a job (only while queued or scheduled)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200': { description: OK }
+        '409': { description: Cannot cancel in current state, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /jobs/{id}/retry:
+    post:
+      summary: Requeue a job currently in the Dead Letter Queue
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200': { description: OK }
+        '404': { description: Job not in DLQ, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /workers:
+    get:
+      summary: List workers for a project, with live active-job counts
+      parameters: [{ name: projectId, in: query, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: OK } }
+
+  /workers/{id}/heartbeats:
+    get:
+      summary: Last 50 heartbeats for a worker
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: OK } }
+
+  /dlq:
+    get:
+      summary: Paginated Dead Letter Queue listing
+      parameters:
+        - { name: queueId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: page, in: query, schema: { type: integer } }
+        - { name: pageSize, in: query, schema: { type: integer } }
+      responses: { '200': { description: OK } }
+
+  /retry-policies:
+    get:
+      summary: List retry policies
+      responses: { '200': { description: OK } }
+    post:
+      summary: Create a retry policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                strategy: { type: string, enum: [fixed, linear, exponential], default: exponential }
+                maxAttempts: { type: integer, default: 5 }
+                baseDelayMs: { type: integer, default: 1000 }
+                maxDelayMs: { type: integer, default: 300000 }
+                jitter: { type: boolean, default: true }
+      responses: { '201': { description: Created } }

@@ -93,13 +93,54 @@ cd backend
 node src/workers/scheduler.js
 ```
 
-### 5. Frontend
+### 5. Stale job reaper (recommended for any real deployment)
+
+Recovers jobs stranded by a worker that crashed without a graceful
+shutdown (heartbeat goes silent while it still holds a claimed job):
+
+```bash
+cd backend
+node src/workers/reaper.js
+```
+
+### 6. Frontend
 
 ```bash
 cd frontend
 npm install
 npm run dev                # http://localhost:5173
 ```
+
+## Deploying a live demo (Render + Netlify)
+
+Backend needs a persistent Node process, a worker process, and Postgres —
+Netlify alone can't host that (static + serverless only). Split across two
+free-tier hosts:
+
+**Backend + worker + DB → Render**
+1. Push this repo to GitHub (if not already).
+2. In Render: New → Blueprint → point at this repo. It reads `render.yaml`
+   at the root and provisions: the API web service, a worker service, a cron
+   scheduler service, and a free Postgres database, all wired together.
+3. After the API deploys, hit its `/api/auth/register` once (or use the
+   dashboard) to create a project — copy that project's `id`.
+4. In the Render dashboard, set the `job-scheduler-worker` service's
+   `PROJECT_ID` env var to that id, and redeploy it.
+5. Note the API's public URL (e.g. `https://job-scheduler-api.onrender.com`).
+
+**Frontend → Netlify**
+1. New site from Git → same repo. It reads `netlify.toml` (base: `frontend`,
+   build: `npm run build`, publish: `frontend/dist`).
+2. Site settings → Environment variables → add `VITE_API_URL` =
+   `https://job-scheduler-api.onrender.com/api` (your Render URL + `/api`).
+3. Deploy.
+
+**Close the loop:** back in Render, set the API service's `CORS_ORIGIN` env
+var to your Netlify URL (e.g. `https://your-site.netlify.app`) and redeploy
+the API, so the browser's requests aren't blocked by CORS.
+
+Free-tier note: Render's free web services spin down after inactivity and
+take ~30s to wake on the first request — expected on a demo link, not a bug.
 
 ## Running tests
 
@@ -114,7 +155,7 @@ node --test src/db/claim.integration.test.js      # concurrency proof, needs Pos
 ## Quick smoke test (curl)
 
 ```bash
-BASE=http://localhost:4000/api
+BASE=http://localhost:4000/api/v1
 
 # 1. Register (creates org + admin user)
 TOKEN=$(curl -s -X POST $BASE/auth/register -H 'Content-Type: application/json' \

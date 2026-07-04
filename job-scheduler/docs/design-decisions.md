@@ -39,6 +39,32 @@ short-lived JWT would mean building a refresh flow just for machine clients.
 A per-project API key is simpler and matches how most job-queue products
 (Sidekiq Pro, Inngest, Temporal Cloud) actually do it.
 
+**Stale job recovery is heartbeat-based, not job-age-based.** A worker that
+dies ungracefully (killed, OOM, host crash) never runs its own shutdown
+handler, so any job it held stays claimed/running forever with nothing else
+noticing. The reaper (`backend/src/workers/reaper.js`) watches for jobs
+whose *claiming worker's heartbeat* has gone silent, not simply "this job
+has been running a while" — a flat age-based timeout would misfire on
+legitimately long-running jobs on a perfectly healthy worker. Recovered jobs
+go through the exact same retry/DLQ decision a normal failure would.
+Verified with three integration tests: requeue-with-retries-remaining,
+dead-letter-when-exhausted, and — just as importantly — confirming a job on
+a live worker is left alone.
+
+**Horizontal scaling of the API layer.** The Express API is stateless — it
+holds no in-process session state, and auth is a JWT the client carries
+itself — so it scales horizontally trivially: run N copies behind a load
+balancer, all pointed at the same Postgres instance, no coordination needed
+between API instances. The WebSocket server is the one exception worth
+naming: it currently pushes from whichever instance a client happened to
+connect to, using that instance's own timer and query. Running multiple API
+instances today just means each client's live-summary push comes from
+whichever instance it's attached to — correct, just not synchronized across
+instances. Fixing that properly (e.g. a shared pub/sub channel like
+`LISTEN`/`NOTIFY` in Postgres, or Redis pub/sub, feeding all instances) is a
+natural next step, not implemented here since a single instance is
+sufficient at this project's scale.
+
 **What's explicitly NOT built, and why:**
 - *Distributed locking beyond Postgres row locks* — out of scope; a single
   Postgres instance is the honest bottleneck ceiling of this design, and

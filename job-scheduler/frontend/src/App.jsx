@@ -1,10 +1,12 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ProjectProvider } from './api/ProjectContext';
+import { ToastProvider } from './components/Toast';
 import Shell from './components/Shell';
 import LoginPage from './pages/LoginPage';
 import QueuesPage from './pages/QueuesPage';
 import QueueDetailPage from './pages/QueueDetailPage';
 import WorkersPage from './pages/WorkersPage';
+import RetryPoliciesPage from './pages/RetryPoliciesPage';
 
 function RequireAuth({ children }) {
   const token = localStorage.getItem('jobscheduler_token');
@@ -13,19 +15,22 @@ function RequireAuth({ children }) {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/" element={
-          <RequireAuth>
-            <ProjectProvider><Shell /></ProjectProvider>
-          </RequireAuth>
-        }>
-          <Route index element={<QueuesPage />} />
-          <Route path="queues/:queueId" element={<QueueDetailPage />} />
-          <Route path="workers" element={<WorkersPage />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+    <ToastProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/" element={
+            <RequireAuth>
+              <ProjectProvider><Shell /></ProjectProvider>
+            </RequireAuth>
+          }>
+            <Route index element={<QueuesPage />} />
+            <Route path="queues/:queueId" element={<QueueDetailPage />} />
+            <Route path="workers" element={<WorkersPage />} />
+            <Route path="retry-policies" element={<RetryPoliciesPage />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </ToastProvider>
   );
 }

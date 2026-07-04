@@ -1,4 +1,4 @@
-const BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+const BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api/v1';
 
 function authHeaders() {
   const token = localStorage.getItem('jobscheduler_token');
@@ -42,4 +42,7 @@ export const api = {
   listWorkers: (projectId) => request('GET', `/workers?projectId=${projectId}`),
 
   listDlq: (queueId) => request('GET', `/dlq?queueId=${queueId}`),
+
+  listRetryPolicies: () => request('GET', '/retry-policies'),
+  createRetryPolicy: (body) => request('POST', '/retry-policies', body),
 };

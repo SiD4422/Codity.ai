@@ -12,7 +12,9 @@ import retryPolicyRoutes from './routes/retryPolicies.routes.js';
 
 export const app = express();
 
-app.use(cors());
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || '*',
+}));
 app.use(express.json({ limit: '2mb' }));
 
 // Global rate limit — protects the API from abusive polling/spam.
@@ -21,13 +23,13 @@ app.use('/api', limiter);
 
 app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 
-app.use('/api/auth', authRoutes);
-app.use('/api/projects', projectRoutes);
-app.use('/api/queues', queueRoutes);
-app.use('/api/jobs', jobRoutes);
-app.use('/api/workers', workerRoutes);
-app.use('/api/dlq', dlqRoutes);
-app.use('/api/retry-policies', retryPolicyRoutes);
+app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/projects', projectRoutes);
+app.use('/api/v1/queues', queueRoutes);
+app.use('/api/v1/jobs', jobRoutes);
+app.use('/api/v1/workers', workerRoutes);
+app.use('/api/v1/dlq', dlqRoutes);
+app.use('/api/v1/retry-policies', retryPolicyRoutes);
 
 // Structured error handler — keeps error shape consistent across the API.
 app.use((err, req, res, next) => {

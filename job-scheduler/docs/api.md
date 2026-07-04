@@ -1,6 +1,10 @@
 # API Documentation
 
-Base URL: `http://localhost:4000/api`
+Base URL: `http://localhost:4000/api/v1`
+
+Machine-readable spec: [`openapi.yaml`](./openapi.yaml) (validated with
+`swagger-cli validate`). This document is the narrative version of the same
+API.
 
 All endpoints except `/auth/register` and `/auth/login` require
 `Authorization: Bearer <jwt>`. Rate limit: 300 requests/min per client
@@ -120,7 +124,7 @@ every 3 seconds while at least one client is connected.
 ## Example: end-to-end curl
 
 ```bash
-BASE=http://localhost:4000/api
+BASE=http://localhost:4000/api/v1
 TOKEN=$(curl -s -X POST $BASE/auth/login -H 'Content-Type: application/json' \
   -d '{"email":"you@example.com","password":"password123"}' | jq -r .token)
 

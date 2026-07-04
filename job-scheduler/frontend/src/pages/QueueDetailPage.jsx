@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { api } from '../api/client';
+import { useToast } from '../components/Toast';
 import StatusBadge from '../components/StatusBadge';
 import { EmptyState } from './QueuesPage';
 
-const TABS = ['Jobs', 'Dead letter', 'New job'];
+const TABS = ['Jobs', 'Metrics', 'Dead letter', 'New job'];
 
 export default function QueueDetailPage() {
   const { queueId } = useParams();
@@ -23,8 +25,92 @@ export default function QueueDetailPage() {
         ))}
       </div>
       {tab === 'Jobs' && <JobExplorer queueId={queueId} />}
+      {tab === 'Metrics' && <MetricsPanel queueId={queueId} />}
       {tab === 'Dead letter' && <DlqPanel queueId={queueId} />}
       {tab === 'New job' && <NewJobPanel queueId={queueId} />}
+    </div>
+  );
+}
+
+const STATUS_COLORS = {
+  queued: '#8A93A6', scheduled: '#9D7BFF', claimed: '#5B8DEF', running: '#5B8DEF',
+  completed: '#2DD4BF', failed: '#F5A623', dead_letter: '#F0596B', cancelled: '#565F73',
+};
+
+function MetricsPanel({ queueId }) {
+  const [stats, setStats] = useState(null);
+  const [history, setHistory] = useState([]);
+  const toast = useToast();
+  const sampleCount = useRef(0);
+
+  async function load() {
+    try {
+      const { data } = await api.queueStats(queueId);
+      setStats(data);
+      sampleCount.current += 1;
+      setHistory(h => [...h, { t: sampleCount.current, completed: data.completedLastHour }].slice(-20));
+    } catch (err) {
+      toast(err.message);
+    }
+  }
+  useEffect(() => { load(); const t = setInterval(load, 4000); return () => clearInterval(t); }, [queueId]);
+
+  if (!stats) return <div style={{ color: 'var(--text-dim)', fontSize: 13 }}>Loading metrics…</div>;
+
+  const chartData = Object.entries(stats.statusCounts).map(([status, count]) => ({ status, count }));
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 16, marginBottom: 24 }}>
+        <MetricCard label="Completed / hour" value={stats.completedLastHour} color="var(--accent-teal)" />
+        <MetricCard label="Avg duration" value={stats.avgDurationMs != null ? `${stats.avgDurationMs}ms` : '—'} color="var(--accent-blue)" />
+        <MetricCard label="In dead letter" value={stats.statusCounts.dead_letter || 0} color="var(--accent-red)" />
+      </div>
+
+      {history.length > 1 && (
+        <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-hair)', borderRadius: 'var(--radius-md)', padding: 20, height: 180, marginBottom: 20 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12 }}>
+            Completed/hour, live (this session — resets on page reload)
+          </div>
+          <ResponsiveContainer width="100%" height="80%">
+            <LineChart data={history}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border-hair)" />
+              <XAxis dataKey="t" tick={false} />
+              <YAxis allowDecimals={false} tick={{ fill: 'var(--text-secondary)', fontSize: 11 }} width={30} />
+              <Tooltip contentStyle={{ background: 'var(--bg-panel-alt)', border: '1px solid var(--border-hair)', fontSize: 12 }} />
+              <Line type="monotone" dataKey="completed" stroke="var(--accent-teal)" strokeWidth={2} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {chartData.length === 0 ? (
+        <EmptyState title="No job data yet" body="Create some jobs to see status distribution here." />
+      ) : (
+        <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-hair)', borderRadius: 'var(--radius-md)', padding: 20, height: 320 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12 }}>Job status distribution</div>
+          <ResponsiveContainer width="100%" height="90%">
+            <BarChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border-hair)" />
+              <XAxis dataKey="status" tick={{ fill: 'var(--text-secondary)', fontSize: 11 }} />
+              <YAxis allowDecimals={false} tick={{ fill: 'var(--text-secondary)', fontSize: 11 }} />
+              <Tooltip contentStyle={{ background: 'var(--bg-panel-alt)', border: '1px solid var(--border-hair)', fontSize: 12 }} />
+              <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                {chartData.map((d, i) => <Cell key={i} fill={STATUS_COLORS[d.status] || 'var(--accent-blue)'} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MetricCard({ label, value, color }) {
+  return (
+    <div style={{ flex: 1, background: 'var(--bg-panel)', border: '1px solid var(--border-hair)', borderRadius: 'var(--radius-md)', padding: 16 }}>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 22, fontWeight: 700, color }}>{value}</div>
+      <div style={{ fontSize: 11, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 4 }}>{label}</div>
     </div>
   );
 }
@@ -34,14 +120,22 @@ function JobExplorer({ queueId }) {
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
+  const toast = useToast();
 
   async function load() {
     const params = { page, pageSize: 20 };
     if (status) params.status = status;
-    const { data, pagination } = await api.listJobs(queueId, params);
-    setJobs(data);
-    setTotal(pagination.total);
+    try {
+      const { data, pagination } = await api.listJobs(queueId, params);
+      setJobs(data);
+      setTotal(pagination.total);
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => { load(); }, [queueId, status, page]);
@@ -58,8 +152,10 @@ function JobExplorer({ queueId }) {
           </select>
         </div>
 
-        {jobs.length === 0 ? (
+        {jobs.length === 0 && !loading ? (
           <EmptyState title="No jobs" body="Jobs matching this filter will show up here as they're created." />
+        ) : loading && jobs.length === 0 ? (
+          <div style={{ color: 'var(--text-dim)', fontSize: 13 }}>Loading jobs…</div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
@@ -98,18 +194,28 @@ function JobExplorer({ queueId }) {
 function JobDetailPanel({ jobId, onClose, onChange }) {
   const [job, setJob] = useState(null);
   const [logs, setLogs] = useState([]);
+  const toast = useToast();
 
   async function load() {
-    const { data } = await api.getJob(jobId);
-    setJob(data);
-    const l = await api.getJobLogs(jobId);
-    setLogs(l.data);
+    try {
+      const { data } = await api.getJob(jobId);
+      setJob(data);
+      const l = await api.getJobLogs(jobId);
+      setLogs(l.data);
+    } catch (err) {
+      toast(err.message);
+    }
   }
   useEffect(() => { load(); }, [jobId]);
 
   async function cancel() {
-    await api.cancelJob(jobId);
-    load(); onChange();
+    if (!window.confirm('Cancel this job? This cannot be undone.')) return;
+    try {
+      await api.cancelJob(jobId);
+      load(); onChange();
+    } catch (err) {
+      toast(err.message);
+    }
   }
 
   if (!job) return null;
@@ -176,18 +282,32 @@ function Row({ label, value, color }) {
 
 function DlqPanel({ queueId }) {
   const [entries, setEntries] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const toast = useToast();
 
   async function load() {
-    const { data } = await api.listDlq(queueId);
-    setEntries(data);
+    try {
+      const { data } = await api.listDlq(queueId);
+      setEntries(data);
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      setLoading(false);
+    }
   }
   useEffect(() => { load(); }, [queueId]);
 
   async function retry(jobId) {
-    await api.retryJob(jobId);
-    load();
+    try {
+      await api.retryJob(jobId);
+      toast('Job requeued', 'success');
+      load();
+    } catch (err) {
+      toast(err.message);
+    }
   }
 
+  if (loading) return <div style={{ color: 'var(--text-dim)', fontSize: 13 }}>Loading…</div>;
   if (entries.length === 0) {
     return <EmptyState title="Dead letter queue is empty" body="Jobs that exhaust all retry attempts land here for manual review." />;
   }
@@ -213,14 +333,19 @@ function DlqPanel({ queueId }) {
 function NewJobPanel({ queueId }) {
   const [type, setType] = useState('immediate');
   const [handler, setHandler] = useState('noop');
+  const [retryPolicyId, setRetryPolicyId] = useState('');
+  const [policies, setPolicies] = useState([]);
   const [extra, setExtra] = useState({ delaySeconds: 10, runAt: '', cronExpression: '*/5 * * * *' });
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => { api.listRetryPolicies().then(r => setPolicies(r.data)).catch(() => {}); }, []);
 
   async function submit(e) {
     e.preventDefault();
     setBusy(true);
     const body = { queueId, type, payload: { handler } };
+    if (retryPolicyId) body.retryPolicyId = retryPolicyId;
     if (type === 'delayed') body.delaySeconds = extra.delaySeconds;
     if (type === 'scheduled') body.runAt = extra.runAt;
     if (type === 'recurring') body.cronExpression = extra.cronExpression;
@@ -250,6 +375,14 @@ function NewJobPanel({ queueId }) {
           <option value="noop">noop (always succeeds)</option>
           <option value="fail-always">fail-always (tests retry / DLQ)</option>
           <option value="sleep">sleep 1s</option>
+        </select>
+      </label>
+
+      <label>
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>Retry policy</div>
+        <select value={retryPolicyId} onChange={e => setRetryPolicyId(e.target.value)} style={{ width: '100%' }}>
+          <option value="">Default (5x, exponential)</option>
+          {policies.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
       </label>
 

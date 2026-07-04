@@ -19,6 +19,7 @@ export default function Shell() {
         </div>
         <NavItem to="/">Queues</NavItem>
         <NavItem to="/workers">Workers</NavItem>
+        <NavItem to="/retry-policies">Retry Policies</NavItem>
         <div style={{ flex: 1 }} />
         <button onClick={logout} style={{ fontSize: 12 }}>Sign out</button>
       </aside>
